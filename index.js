@@ -32,3 +32,10 @@ app.get("/", (req, res) => {
     res.send({ message: "Server Running" });
 })
 
+
+// --------------- joined ------------------------------
+
+app.get("/participants", async (req, res) => {
+    const result = await joinedDb.find().toArray();
+    res.send(result);
+})
