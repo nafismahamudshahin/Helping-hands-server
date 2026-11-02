@@ -26,3 +26,9 @@ const dbConnecte = await connectToMongoDB();
 const db = dbConnecte.db("helpinghandsdb");
 const eventsDb = db.collection("events");
 const joinedDb = db.collection("joined");
+
+// --------------- root api ----------------------------
+app.get("/", (req, res) => {
+    res.send({ message: "Server Running" });
+})
+
