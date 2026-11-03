@@ -162,7 +162,7 @@ app.post("/events", async (req, res) => {
 // http://localhost:5000/events/my/id
 app.get("/events/my/:id", async (req, res) => {
     const userid = req.params.id;
-    const result = await eventsDb.find({ userId: userid }).sort({ date: 1 }).toArray();
+    const result = await eventsDb.find({ userId: userid }).toArray();
     res.send(result)
 })
 
@@ -201,37 +201,36 @@ app.patch("/events/:id", async (req, res) => {
 
 // delete event:
 app.delete("/events/:id", async (req, res) => {
+    const session = client.startSession();
     try {
-
-        const session = client.startSession();
         const id = req.params.id;
         await session.withTransaction(async () => {
-
-            await joinedDb.deleteMany(
-                { eventId: id },
-                { session }
-            );
+            await joinedDb.deleteMany({ eventId: id }, { session });
             const result = await eventsDb.deleteOne(
                 { _id: new ObjectId(id) },
                 { session }
             );
-
             if (result.deletedCount === 0) {
                 throw new Error("Event not found");
             }
         });
-
-        await session.endSession();
-
         res.send({
             success: true,
             message: "Event and all participants deleted successfully"
         });
-
     } catch (error) {
-        res.status(500).send({
+        const notFound = error.message === "Event not found";
+        res.status(notFound ? 404 : 500).send({
             success: false,
             message: error.message
         });
+    } finally {
+        await session.endSession();
     }
 })
+
+app.listen(PORT, (req, res) => {
+    console.log(`Server running on port ${PORT}`);
+})
+
+export default app;
