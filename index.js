@@ -62,3 +62,21 @@ app.post("/participants", async (req, res) => {
         })
     }
 })
+
+// where i participate:
+app.get("/participants/me/:id", async (req, res) => {
+    try {
+        const id = req.params.id;
+
+        const result = await joinedDb
+            .find({ userId: id })
+            .toArray();
+
+        res.send(result);
+
+    } catch (error) {
+        res.status(500).send({
+            message: "Failed to fetch joined events"
+        });
+    }
+})
