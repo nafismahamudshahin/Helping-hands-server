@@ -171,3 +171,10 @@ app.get("/near-upcoming-events", async (req, res) => {
     const events = await eventsDb.find({ date: { $gte: today } }).sort({ date: 1 }).limit(6).toArray();
     res.send(events);
 })
+
+// get event by id:
+app.get("/events/:id", async (req, res) => {
+    const id = req.params.id;
+    const event = await eventsDb.findOne({ _id: new ObjectId(id) })
+    res.send(event)
+})
