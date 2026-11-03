@@ -153,20 +153,16 @@ app.get("/upcoming-events", async (req, res) => {
 })
 // create new event:
 app.post("/events", async (req, res) => {
-    try {
-        const event = req.body;
-        const result = await eventsDb.insertOne(event);
-        res.send(result)
-    } catch (error) {
-        res.status(500).send({ message: "Failed to create event" });
-    }
+    const event = req.body;
+    const result = await eventsDb.insertOne(event);
+    res.send(result)
 })
 
 
 // http://localhost:5000/events/my/id
 app.get("/events/my/:id", async (req, res) => {
     const userid = req.params.id;
-    const result = await eventsDb.find({ userId: userid }).toArray();
+    const result = await eventsDb.find({ userId: userid }).sort({ date: 1 }).toArray();
     res.send(result)
 })
 
