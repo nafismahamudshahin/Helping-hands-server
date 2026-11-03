@@ -153,9 +153,13 @@ app.get("/upcoming-events", async (req, res) => {
 })
 // create new event:
 app.post("/events", async (req, res) => {
-    const event = req.body;
-    const result = await eventsDb.insertOne(event);
-    res.send(result)
+    try {
+        const event = req.body;
+        const result = await eventsDb.insertOne(event);
+        res.send(result)
+    } catch (error) {
+        res.status(500).send({ message: "Failed to create event" });
+    }
 })
 
 
