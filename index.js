@@ -80,3 +80,10 @@ app.get("/participants/me/:id", async (req, res) => {
         });
     }
 })
+
+// increment joined:
+app.patch("/count-joined/:id", async (req, res) => {
+    const id = req.params.id;
+    const result = await eventsDb.updateOne({ _id: new ObjectId(id) }, { $inc: { joined: 1 } });
+    res.send(result);
+})
