@@ -135,7 +135,17 @@ app.delete("/participants/me/:joinId", async (req, res) => {
 // get all events:
 app.get("/events", async (req, res) => {
     try {
-        const events = await eventsDb.find().toArray();
+        const events = await eventsDb.find().sort({ date: 1 }).toArray();
+        res.send(events);
+    } catch (error) {
+        res.status(500).send({ message: "internal server error" })
+    }
+})
+
+// upcomming events
+app.get("/upcoming-events", async (req, res) => {
+    try {
+        const events = await eventsDb.find({ date: { $gte: today } }).sort({ date: 1 }).toArray();
         res.send(events);
     } catch (error) {
         res.status(500).send({ message: "internal server error" })
