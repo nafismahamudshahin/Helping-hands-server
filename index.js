@@ -157,3 +157,11 @@ app.post("/events", async (req, res) => {
     const result = await eventsDb.insertOne(event);
     res.send(result)
 })
+
+
+// http://localhost:5000/events/my/id
+app.get("/events/my/:id", async (req, res) => {
+    const userid = req.params.id;
+    const result = await eventsDb.find({ userId: userid }).toArray();
+    res.send(result)
+})
