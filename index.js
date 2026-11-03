@@ -87,3 +87,42 @@ app.patch("/count-joined/:id", async (req, res) => {
     const result = await eventsDb.updateOne({ _id: new ObjectId(id) }, { $inc: { joined: 1 } });
     res.send(result);
 })
+
+
+// Delete Participient:
+app.delete("/participants/me/:joinId", async (req, res) => {
+    try {
+        const joinId = req.params.joinId;
+        // find joined event:
+        const joined = await joinedDb.findOne({ _id: new ObjectId(joinId) });
+
+        if (!joined) {
+            return res.status(404).send({
+                message: "Joined event not found",
+            });
+        }
+        // decrement joined from event:
+        const eventId = joined.eventId;
+        await eventsDb.updateOne({ _id: new ObjectId(eventId) }, { $inc: { joined: -1 } });
+
+        // delete participient from the joined:
+        const result = await joinedDb.deleteOne({ _id: new ObjectId(joinId) });
+
+        if (result.deletedCount === 0) {
+            return res.status(404).send({
+                message: "Failed to delete joined event",
+            });
+        }
+
+        res.send({
+            success: true,
+            message: "Successfully cancelled event participation",
+        });
+
+    } catch (error) {
+        res.status(500).send({
+            success: false,
+            message: "Internal server error",
+        });
+    }
+})
