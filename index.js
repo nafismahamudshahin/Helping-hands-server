@@ -49,3 +49,16 @@ app.get("/check-join/:userId/:eventId", async (req, res) => {
     })
     res.send({ joined: !!joined })
 })
+
+// for new add:
+app.post("/participants", async (req, res) => {
+    try {
+        const joined = req.body;
+        const result = await joinedDb.insertOne(joined)
+        res.send(result);
+    } catch (error) {
+        res.status(500).send({
+            message: "Failed to joined events"
+        })
+    }
+})
