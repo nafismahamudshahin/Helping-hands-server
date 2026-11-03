@@ -39,3 +39,13 @@ app.get("/participants", async (req, res) => {
     const result = await joinedDb.find().toArray();
     res.send(result);
 })
+
+app.get("/check-join/:userId/:eventId", async (req, res) => {
+    const { userId, eventId } = req.params
+
+    const joined = await joinedDb.findOne({
+        userId,
+        eventId,
+    })
+    res.send({ joined: !!joined })
+})
