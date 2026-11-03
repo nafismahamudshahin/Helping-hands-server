@@ -151,3 +151,9 @@ app.get("/upcoming-events", async (req, res) => {
         res.status(500).send({ message: "internal server error" })
     }
 })
+// create new event:
+app.post("/events", async (req, res) => {
+    const event = req.body;
+    const result = await eventsDb.insertOne(event);
+    res.send(result)
+})
