@@ -165,3 +165,9 @@ app.get("/events/my/:id", async (req, res) => {
     const result = await eventsDb.find({ userId: userid }).toArray();
     res.send(result)
 })
+
+// upcoming 6 events:
+app.get("/near-upcoming-events", async (req, res) => {
+    const events = await eventsDb.find({ date: { $gte: today } }).sort({ date: 1 }).limit(6).toArray();
+    res.send(events);
+})
