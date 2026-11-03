@@ -126,3 +126,18 @@ app.delete("/participants/me/:joinId", async (req, res) => {
         });
     }
 })
+
+
+
+
+// --------------------- Events ---------------------------
+
+// get all events:
+app.get("/events", async (req, res) => {
+    try {
+        const events = await eventsDb.find().toArray();
+        res.send(events);
+    } catch (error) {
+        res.status(500).send({ message: "internal server error" })
+    }
+})
