@@ -178,3 +178,23 @@ app.get("/events/:id", async (req, res) => {
     const event = await eventsDb.findOne({ _id: new ObjectId(id) })
     res.send(event)
 })
+
+// update event:
+app.patch("/events/:id", async (req, res) => {
+    try {
+        const id = req.params.id;
+        const updated = req.body;
+
+        const result = await eventsDb.updateOne(
+            { _id: new ObjectId(id) },
+            { $set: updated }
+        );
+
+        res.send(result);
+
+    } catch (error) {
+        res.status(500).send({
+            message: "Failed to update event"
+        });
+    }
+})
