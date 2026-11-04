@@ -86,9 +86,24 @@ app.get("/near-upcoming-events", async (req, res) => {
 
 // get event by id:
 app.get("/events/:id", async (req, res) => {
-    const id = req.params.id;
-    const event = await eventsDb.findOne({ _id: new ObjectId(id) })
-    res.send(event)
+    try {
+        const { id } = req.params
+
+        // Malformed ID can never match a document -> 404, not 500
+        if (!ObjectId.isValid(id) || String(new ObjectId(id)) !== id) {
+            return res.status(404).json({ message: "Event not found" })
+        }
+
+        const event = await eventsDb.findOne({ _id: new ObjectId(id) })
+        if (!event) {
+            return res.status(404).json({ message: "Event not found" })
+        }
+
+        res.json(event)
+    } catch (error) {
+        console.error("GET /events/:id failed:", error)
+        res.status(500).json({ message: "Internal server error" })
+    }
 })
 
 
