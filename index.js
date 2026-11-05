@@ -145,9 +145,7 @@ app.get("/participants/me/:id", verifyToken, async (req, res) => {
     try {
         const id = req.params.id;
 
-        const result = await joinedDb
-            .find({ userId: id })
-            .toArray();
+        const result = await joinedDb.find({ userId: id }).sort({ eventDate: 1 }).toArray();
 
         res.send(result);
 
