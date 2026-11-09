@@ -348,6 +348,15 @@ app.patch("/certificate/:id", verifyToken, async (req, res) => {
 });
 
 
+// verify certificate:
+app.get('/cerfificate/:id', async (req, res) => {
+    const id = req.params.id;
+    console.log("for verify: ", id)
+    const result = await certificatesDb.findOne({ certificateId: id })
+    res.send(result)
+})
+
+
 app.patch("/events/:id", verifyToken, async (req, res) => {
     try {
         const id = req.params.id;
