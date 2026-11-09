@@ -3,6 +3,7 @@ import { MongoClient, ObjectId } from 'mongodb';
 import express from "express";
 import cors from "cors";
 import { createRemoteJWKSet, jwtVerify } from 'jose';
+import crypto from "crypto";
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -27,6 +28,7 @@ const dbConnecte = await connectToMongoDB();
 const db = dbConnecte.db("helpinghandsdb");
 const eventsDb = db.collection("events");
 const joinedDb = db.collection("joined");
+const certificatesDb = db.collection("certificates");
 
 // Jwt token verify:
 
@@ -108,6 +110,277 @@ app.get("/events/:id", async (req, res) => {
 
 
 // -------------------------   End Home  -------------------------------------------
+
+// certificate:
+
+// Certificate APIs
+
+try {
+    await certificatesDb.createIndex({ userId: 1, eventId: 1 }, { unique: true });
+    await certificatesDb.createIndex({ certificateId: 1 }, { unique: true });
+} catch (error) {
+    // Usually means old test certificates are missing userId/eventId. Delete them in MongoDB and restart.
+    console.error("[cert] Could not create certificate indexes:", error.message);
+}
+
+// who is the logged-in user? (id comes from the verified token, never from the URL)
+const getUserId = (req) => req.user?.id || req.user?.sub;
+const isAdmin = (req) => req.user?.role === "admin";
+
+// An event is "ended" when its status is Completed OR its date is already in the past.
+// ADAPT: if your events have an end date field, name it "endDate" (it is used when present).
+// Dates are compared as "YYYY-MM-DD" text, the same format your events already use.
+// (computed fresh each time, so it never gets stale while the server keeps running)
+// "today" in YOUR timezone (UTC would be a day behind in Bangladesh between 12am and 6am).
+// ADAPT: change the zone with APP_TIMEZONE in .env if needed.
+const APP_TZ = process.env.APP_TIMEZONE || "Asia/Dhaka";
+const todayStr = () => new Date().toLocaleDateString("en-CA", { timeZone: APP_TZ }); // YYYY-MM-DD
+const dayOf = (d) => (d instanceof Date ? d.toISOString() : String(d)).slice(0, 10);
+const isEventEnded = (ev) =>
+    ev.status === "Completed" || dayOf(ev.endDate || ev.date || "9999-12-31") < todayStr();
+
+// Creates the certificate if it doesn't exist yet (safe to call many times, never duplicates)
+async function issueCertificate({ userId, eventId, eventTitle, participantName }) {
+    return certificatesDb.findOneAndUpdate(
+        { userId, eventId },
+        {
+            $setOnInsert: {
+                certificateId: crypto.randomUUID(),
+                userId,
+                eventId,
+                eventTitle,
+                participantName,
+                issueDate: new Date(),
+            },
+        },
+        { upsert: true, returnDocument: "after" }
+    );
+}
+
+// Your "joined" documents have NO name field, so we look the name up:
+// 1) a name saved on the joined doc (if any)  2) the logged-in token's name
+// 3) the auth "user" collection (Better Auth default name: "user")  4) "Participant"
+// ADAPT: if your users live in another collection/database, change usersDb below.
+const usersDb = db.collection("user");
+async function nameFromJoined(j, fallback) {
+    const direct = j?.userName || j?.name || j?.participantName;
+    if (direct) return direct;
+    if (fallback) return fallback;
+    try {
+        const uid = j?.userId;
+        let u = null;
+        if (uid && ObjectId.isValid(uid)) u = await usersDb.findOne({ _id: new ObjectId(uid) });
+        if (!u && uid) u = await usersDb.findOne({ id: uid });
+        if (u?.name) return u.name;
+    } catch (e) { /* fall through */ }
+    return "Participant";
+}
+
+// Get all certificates (admin only)
+app.get("/certificate", verifyToken, async (req, res) => {
+    try {
+        if (!isAdmin(req)) return res.status(403).send({ message: "Admin only" });
+        const certificates = await certificatesDb.find({}).sort({ issueDate: -1 }).toArray();
+        res.send(certificates);
+    } catch (error) {
+        res.status(500).send({ message: "Failed to fetch certificates" });
+    }
+});
+
+// Get MY certificates
+app.get("/certificate/my", verifyToken, async (req, res) => {
+    try {
+        const certificates = await certificatesDb
+            .find({ userId: getUserId(req) })
+            .sort({ issueDate: -1 })
+            .toArray();
+        res.send(certificates);
+    } catch (error) {
+        res.status(500).send({ message: "Failed to fetch certificates" });
+    }
+});
+
+// Get ONE certificate by Certificate ID (owner only)
+app.get("/certificate/id/:certificateId", verifyToken, async (req, res) => {
+    try {
+        const cert = await certificatesDb.findOne({ certificateId: req.params.certificateId });
+        if (!cert) return res.status(404).send({ message: "Certificate not found" });
+        if (cert.userId !== getUserId(req) && !isAdmin(req)) {
+            return res.status(403).send({ message: "Forbidden access" });
+        }
+        res.send(cert);
+    } catch (error) {
+        res.status(500).send({ message: "Failed to fetch certificate" });
+    }
+});
+
+// Generate certificate for me (server checks the event has ended and I joined it)
+app.post("/certificate", verifyToken, async (req, res) => {
+    try {
+        const { eventId } = req.body;
+        const userId = getUserId(req);
+        if (!ObjectId.isValid(eventId)) return res.status(400).send({ message: "Invalid eventId" });
+
+        const event = await eventsDb.findOne({ _id: new ObjectId(eventId) });
+        if (!event) return res.status(404).send({ message: "Event not found" });
+        if (!isEventEnded(event)) return res.status(400).send({ message: "Event has not ended yet" });
+
+        const joined = await joinedDb.findOne({ userId, eventId: { $in: [eventId, new ObjectId(eventId)] } });
+        if (!joined) return res.status(403).send({ message: "You did not participate in this event" });
+
+        const existing = await certificatesDb.findOne({ userId, eventId });
+        if (existing) return res.status(409).send({ message: "Certificate already exists", certificate: existing });
+
+        const certificate = await issueCertificate({
+            userId,
+            eventId,
+            eventTitle: event.title,
+            participantName: await nameFromJoined(joined, req.user?.name),
+        });
+        res.status(201).send({ message: "Certificate generated successfully", certificate });
+    } catch (error) {
+        if (error.code === 11000) return res.status(409).send({ message: "Certificate already exists" });
+        res.status(500).send({ message: "Failed to generate certificate" });
+    }
+});
+
+// Safety net: the Certificate page calls this to create any missing certificates
+app.post("/certificate/sync", verifyToken, async (req, res) => {
+    try {
+        const userId = getUserId(req);
+        const myJoins = await joinedDb.find({ userId }).toArray();
+        const ids = myJoins.map((j) => String(j.eventId)).filter((id) => ObjectId.isValid(id)).map((id) => new ObjectId(id));
+        const completed = (await eventsDb.find({ _id: { $in: ids } }).toArray()).filter(isEventEnded);
+
+        for (const ev of completed) {
+            const eventId = ev._id.toString();
+            const join = myJoins.find((j) => String(j.eventId) === eventId);
+            await issueCertificate({
+                userId,
+                eventId,
+                eventTitle: ev.title,
+                participantName: await nameFromJoined(join, req.user?.name),
+            });
+        }
+        // certificates made by the background job may carry the placeholder name: fix it now
+        if (req.user?.name) {
+            await certificatesDb.updateMany(
+                { userId, participantName: "Participant" },
+                { $set: { participantName: req.user.name } }
+            );
+        }
+        res.send({ ok: true });
+    } catch (error) {
+        res.status(500).send({ message: "Sync failed" });
+    }
+});
+
+// AUTOMATIC: give a certificate to every participant of every ended event.
+// Runs when the server starts and then every hour. Safe to repeat (no duplicates).
+async function issueCertificatesForEndedEvents() {
+    try {
+        const all = await eventsDb.find({}).toArray();
+        const events = all.filter(isEventEnded);
+        console.log(`[cert-job] today=${todayStr()} | events=${all.length} | ended=${events.length}`);
+        if (all.length && events.length === 0) {
+            console.log("[cert-job] No ended event found. First event looks like:",
+                { date: all[0].date, endDate: all[0].endDate, status: all[0].status });
+        }
+
+        let created = 0;
+        for (const ev of events) {
+            const eventId = ev._id.toString();
+            // "joined" may store eventId as text or as ObjectId: accept both
+            const participants = await joinedDb.find({ eventId: { $in: [eventId, ev._id] } }).toArray();
+            console.log(`[cert-job] "${ev.title}" (${dayOf(ev.date)}) participants=${participants.length}`);
+
+            if (participants.length === 0) {
+                const sample = await joinedDb.findOne({});
+                if (sample) {
+                    console.log("[cert-job] joined doc fields:",
+                        Object.fromEntries(Object.entries(sample).map(([k, v]) => [k, typeof v])),
+                        "| its eventId:", String(sample.eventId), "| this event _id:", eventId);
+                }
+                continue;
+            }
+
+            const have = new Set(
+                (await certificatesDb.find({ eventId }).project({ userId: 1 }).toArray()).map((c) => c.userId)
+            );
+            for (const p of participants) {
+                if (!p.userId) { console.log("[cert-job] joined doc has no userId, skipped"); continue; }
+                if (have.has(p.userId)) continue;
+                await issueCertificate({
+                    userId: p.userId,
+                    eventId,
+                    eventTitle: ev.title,
+                    participantName: await nameFromJoined(p),
+                });
+                created++;
+            }
+        }
+        console.log(`[cert-job] done. new certificates: ${created}`);
+    } catch (error) {
+        console.error("[cert-job] FAILED:", error);
+    }
+}
+issueCertificatesForEndedEvents();
+setInterval(issueCertificatesForEndedEvents, 60 * 60 * 1000);
+
+// Edit certificate text (admin only)
+app.patch("/certificate/:id", verifyToken, async (req, res) => {
+    try {
+        if (!isAdmin(req)) return res.status(403).send({ message: "Admin only" });
+        if (!ObjectId.isValid(req.params.id)) return res.status(400).send({ message: "Invalid id" });
+
+        const updateDoc = {};
+        ["eventTitle", "participantName"].forEach((f) => {
+            if (req.body[f] !== undefined) updateDoc[f] = req.body[f];
+        });
+        if (Object.keys(updateDoc).length === 0) return res.status(400).send({ message: "No valid fields provided" });
+
+        const result = await certificatesDb.updateOne({ _id: new ObjectId(req.params.id) }, { $set: updateDoc });
+        if (result.matchedCount === 0) return res.status(404).send({ message: "Certificate not found" });
+        res.send({ message: "Certificate updated successfully" });
+    } catch (error) {
+        res.status(500).send({ message: "Failed to update certificate" });
+    }
+});
+
+
+app.patch("/events/:id", verifyToken, async (req, res) => {
+    try {
+        const id = req.params.id;
+        const updated = req.body;
+
+        const result = await eventsDb.updateOne(
+            { _id: new ObjectId(id) },
+            { $set: updated }
+        );
+
+        // AUTO-GENERATE certificates when the event is marked Completed
+        if (updated.status === "Completed") {
+            const event = await eventsDb.findOne({ _id: new ObjectId(id) });
+            const participants = await joinedDb.find({ eventId: id }).toArray();
+            await Promise.all(
+                participants.map(async (p) =>
+                    issueCertificate({
+                        userId: p.userId,
+                        eventId: id,
+                        eventTitle: event.title,
+                        participantName: await nameFromJoined(p),
+                    })
+                )
+            );
+        }
+
+        res.send(result);
+    } catch (error) {
+        res.status(500).send({ message: "Failed to update event" });
+    }
+});
+
+// certificate api end here
 
 
 // --------------- joined ------------------------------
